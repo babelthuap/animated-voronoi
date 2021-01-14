@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Animated Voronoi</title>
+<style>
+html, body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  padding: 0;
+}
+body {
+  background-color: #000;
+  color: #fff;
+  font-family: Courier, monospace;
+}
+#controls {
+  display: flex;
+  font-size: 16px;
+  justify-content: center;
+  padding: 8px;
+}
+#controls > * {
+  margin: 0 20px;
+  z-index: 1;
+}
+#numCells {
+  font-size: 16px;
+  font-family: Courier, monospace;
+  width: 72px;
+}
+#metric {
+  font-size: 16px;
+  height: 25px;
+  font-family: Courier, monospace;
+}
+#regenerate {
+  background-color: #fff;
+  border-radius: 4px;
+  color: #000;
+  cursor: pointer;
+  font-family: Courier, monospace;
+  font-size: 20px;
+}
+#canvasContainer {
+  height: 100vh;
+  left: 0;
+  position: fixed;
+  top: 0;
+  width: 100vw;
+}
+</style>
+<body>
+<div id="controls">
+  <input id="numCells" title="number of cells" type="number" value="200" min="2">
+  <select id="metric" title="metric">
+    <option value="1">taxicab</option>
+    <option value="2" selected>euclidean</option>
+    <option value="3">x^3 + y^3</option>
+  </select>
+  <button id="regenerate">regenerate</button>
+</div>
+<div id="canvasContainer"></div>
+<script>
+(() => {
+'use strict';
+
+const El = {
+  CANVAS_CONTAINER: document.getElementById('canvasContainer'),
+  CONTROLS: document.getElementById('controls'),
+  METRIC: document.getElementById('metric'),
+  NUM_CELLS: document.getElementById('numCells'),
+  REGENERATE: document.getElementById('regenerate'),
+};
+
+if (localStorage.animatedVoronoiNumCells) {
+  El.NUM_CELLS.value = localStorage.animatedVoronoiNumCells;
+}
+El.NUM_CELLS.addEventListener(
+    'change', () => localStorage.animatedVoronoiNumCells = El.NUM_CELLS.value);
+if (localStorage.animatedVoronoiMetric) {
+  El.METRIC.value = localStorage.animatedVoronoiMetric;
+}
+El.METRIC.addEventListener(
+    'change', () => localStorage.animatedVoronoiMetric = El.METRIC.value);
+
+const METRICS = {
+  1: (x1, y1, x2, y2) => Math.abs(x1 - x2) + Math.abs(y1 - y2),
+  2: (x1, y1, x2, y2) => {
+    const dx = x1 - x2;
+    const dy = y1 - y2;
+    return dx * dx + dy * dy;
+  },
+  3: (x1, y1, x2, y2) => {
+    const dx = Math.abs(x1 - x2);
+    const dy = Math.abs(y1 - y2);
+    return dx * dx * dx + dy * dy * dy;
+  },
+};
+
+const NBR_8 = [
+  [-1, -1], [0, -1], [1, -1],
+  [-1,  0],          [1,  0],
+  [-1,  1], [0,  1], [1,  1],
+];
+const NBR_UP = [[0, -1]];
+const NBR_DN = [[0, 1]];
+const NBR_RT = [[1, 0]];
+const NBR_LT = [[-1, 0]];
+const NBRS_Q1 = [[1, 0], [1, -1], [0, -1]];
+const NBRS_Q2 = [[0, -1], [-1, -1], [-1, 0]];
+const NBRS_Q3 = [[-1, 0], [-1, 1], [0, 1]];
+const NBRS_Q4 = [[0, 1], [1, 1], [1, 0]];
+
+const rand = (n) => Math.floor(Math.random() * n);
+
+const MASK = 2 ** 15 - 1;
+const pair = (x, y) => (x << 15) + y;
+const unpair = n => [n >> 15, n & MASK];
+
+function PriorityQueue() {
+  const heap = [];
+  const parent = i => (i - 1) >> 1;
+  const leftChild = i => (i << 1) + 1;
+  const rightChild = i => (i + 1) << 1;
+  return {
+    get size() {
+      return heap.length;
+    },
+    push(value, priority) {
+      heap.push({value, priority});
+      // percolate up
+      let i = heap.length - 1;
+      const node = heap[i];
+      while (i > 0) {
+        const p = parent(i);
+        if (heap[p].priority > node.priority) {
+          heap[i] = heap[p];
+          i = p;
+        } else {
+          break;
+        }
+      }
+      heap[i] = node;
+    },
+    pop() {
+      if (heap.length === 1) {
+        return heap.pop().value;
+      }
+      const value = heap[0].value;
+      // percolate down
+      const node = heap[0] = heap.pop();
+      const size = heap.length;
+      let i = 0;
+      while (i < (size >> 1)) {
+        const left = leftChild(i);
+        const right = rightChild(i);
+        const minChild =
+            (right < size && heap[right].priority < heap[left].priority) ?
+            right :
+            left;
+        if (heap[minChild].priority > node.priority) {
+          break;
+        }
+        heap[i] = heap[minChild];
+        i = minChild;
+      }
+      heap[i] = node;
+      return value;
+    },
+  };
+}
+
+function Bitmap() {
+  // fill the entire container
+  const width = El.CANVAS_CONTAINER.offsetWidth;
+  const height = El.CANVAS_CONTAINER.offsetHeight;
+  // reset the canvas element
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, width, height);
+  let imageData = ctx.getImageData(0, 0, width, height);
+  // attach to dom
+  [...El.CANVAS_CONTAINER.children].forEach(child => child.remove());
+  El.CANVAS_CONTAINER.appendChild(canvas);
+  // methods
+  return {
+    get width() {
+      return width;
+    },
+    get height() {
+      return height;
+    },
+    repaint() {
+      ctx.putImageData(imageData, 0, 0);
+    },
+    setPixel(x, y, rgb) {
+      const red = 4 * (x + width * y);
+      imageData.data[red] = rgb[0];
+      imageData.data[red + 1] = rgb[1];
+      imageData.data[red + 2] = rgb[2];
+    },
+  };
+}
+
+function AnimatedVoronoi(numCells) {
+  const metric = METRICS[El.METRIC.value];
+
+  // init bitmap
+  const bitmap = new Bitmap();
+  const width = bitmap.width;
+  const height = bitmap.height;
+  if (numCells > width * height / 9) {
+    console.log('too many cells!');
+    return;
+  }
+
+  const isValid = (x, y) => 0 <= x && x < width && 0 <= y && y < height;
+
+  // determine animation speed
+  const frames = 200;
+  const pixelsPerIteration = Math.ceil(width * height / frames);
+  let isPaused = false;
+
+  // place cells
+  const cells = (() => {
+    const cells = new Array(numCells);
+    const centers = new Set();
+    // thirds - so we don't place cells in adjacent pixels
+    const w = Math.floor(width / 3);
+    const h = Math.floor(height / 3);
+    for (let id = 0; id < numCells; id++) {
+      let x, y;
+      do {
+        x = rand(w) * 3;
+        y = rand(h) * 3;
+      } while (centers.has(pair(x, y)));
+      centers.add(pair(x, y));
+      const color = Uint8ClampedArray.from([rand(256), rand(256), rand(256)])
+      cells[id] = {id, x, y, color};
+    }
+    return cells;
+  })();
+
+  // partition cells with a little help from Dijkstra
+  const visited = new Array(height).fill().map(() => new Array(width));
+  const queue = new PriorityQueue(width * height);
+
+  // visit centers and their immediate neighbors
+  for (let id = 0; id < cells.length; id++) {
+    const cell = cells[id];
+    visited[cell.y][cell.x] = id;
+    for (const [dx, dy] of NBR_8) {
+      const nbrX = cell.x + dx;
+      const nbrY = cell.y + dy;
+      if (isValid(nbrX, nbrY)) {
+        visited[nbrY][nbrX] = true;
+        queue.push(
+            {x: nbrX, y: nbrY, cell}, metric(cell.x, cell.y, nbrX, nbrY));
+      }
+    }
+  }
+
+  // color in the specified number of cells on each frame
+  const drawFrame = () => {
+    for (let i = 0; i < pixelsPerIteration && queue.size > 0; i++) {
+      const {x, y, cell} = queue.pop();
+      // color pixel
+      visited[y][x] = cell.id;
+      bitmap.setPixel(x, y, cell.color);
+      // determine neighbors by quadrant
+      let neighborOffsets;
+      let relativeX = Math.sign(x - cell.x);
+      let relativeY = Math.sign(y - cell.y);
+      switch (relativeX) {
+        case 0:
+          // vertical
+          neighborOffsets = relativeY === 1 ? NBR_DN : NBR_UP;
+          break;
+        case 1:
+          // right
+          switch (relativeY) {
+            case 0:
+              neighborOffsets = NBR_RT;
+              break;
+            case 1:
+              neighborOffsets = NBRS_Q4;
+              break;
+            case -1:
+              neighborOffsets = NBRS_Q1;
+              break;
+          }
+          break;
+        case -1:
+          // left
+          switch (relativeY) {
+            case 0:
+              neighborOffsets = NBR_LT;
+              break;
+            case 1:
+              neighborOffsets = NBRS_Q3;
+              break;
+            case -1:
+              neighborOffsets = NBRS_Q2;
+              break;
+          }
+          break;
+      }
+      // add neighbors to priority queue
+      for (const [dx, dy] of neighborOffsets) {
+        const nbrX = x + dx;
+        const nbrY = y + dy;
+        if (isValid(nbrX, nbrY) && visited[nbrY][nbrX] === undefined) {
+          visited[nbrY][nbrX] = true;
+          queue.push(
+              {x: nbrX, y: nbrY, cell}, metric(cell.x, cell.y, nbrX, nbrY));
+        }
+      }
+    }
+    bitmap.repaint();
+    if (queue.size > 0 && !isPaused) {
+      requestAnimationFrame(drawFrame);
+    }
+  };
+  requestAnimationFrame(drawFrame);
+
+  return {
+    togglePause: () => {
+      isPaused = !isPaused;
+      if (!isPaused) {
+        drawFrame();
+      }
+    },
+  };
+}
+
+let v;
+const regenerate = () => {
+  v = new AnimatedVoronoi(parseInt(El.NUM_CELLS.value));
+};
+El.REGENERATE.addEventListener('click', regenerate);
+El.CANVAS_CONTAINER.addEventListener('mousedown', () => v.togglePause());
+regenerate();
+})();
+</script>
+</body>
+</html>
