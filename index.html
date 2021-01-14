@@ -16,15 +16,36 @@ body {
   color: #fff;
   font-family: Courier, monospace;
 }
+#menu {
+  left: 8px;
+  position: fixed;
+  top: 8px;
+  z-index: 1;
+}
+#hamburger {
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+#hamburger > div {
+  background-color: #fff;
+  border-radius: 4px;
+  border: 1px solid #000;
+  height: 4px;
+  margin: 4px;
+  width: 32px;
+}
 #controls {
   display: flex;
+  flex-direction: column;
   font-size: 16px;
   justify-content: center;
-  padding: 8px;
 }
 #controls > * {
-  margin: 0 20px;
+  margin: 8px 0;
   z-index: 1;
+}
+#controls.hidden {
+  display: none;
 }
 #numCells {
   font-size: 16px;
@@ -40,7 +61,6 @@ body {
   background-color: #fff;
   border-radius: 4px;
   color: #000;
-  cursor: pointer;
   font-family: Courier, monospace;
   font-size: 20px;
 }
@@ -53,14 +73,21 @@ body {
 }
 </style>
 <body>
-<div id="controls">
-  <input id="numCells" title="number of cells" type="number" value="200" min="2">
-  <select id="metric" title="metric">
-    <option value="1">taxicab</option>
-    <option value="2" selected>euclidean</option>
-    <option value="3">x^3 + y^3</option>
-  </select>
-  <button id="regenerate">regenerate</button>
+<div id="menu">
+  <div id="hamburger">
+    <div></div>
+    <div></div>
+    <div></div>
+  </div>
+  <div id="controls" class="hidden">
+    <input id="numCells" title="number of cells" type="number" value="100">
+    <select id="metric" title="metric">
+      <option value="1">taxicab</option>
+      <option value="2" selected>euclidean</option>
+      <option value="3">x^3 + y^3</option>
+    </select>
+    <button id="regenerate">regenerate</button>
+  </div>
 </div>
 <div id="canvasContainer"></div>
 <script>
@@ -70,6 +97,7 @@ body {
 const El = {
   CANVAS_CONTAINER: document.getElementById('canvasContainer'),
   CONTROLS: document.getElementById('controls'),
+  HAMBURGER: document.getElementById('hamburger'),
   METRIC: document.getElementById('metric'),
   NUM_CELLS: document.getElementById('numCells'),
   REGENERATE: document.getElementById('regenerate'),
@@ -85,6 +113,16 @@ if (localStorage.animatedVoronoiMetric) {
 }
 El.METRIC.addEventListener(
     'change', () => localStorage.animatedVoronoiMetric = El.METRIC.value);
+
+  let expandMenu = false;
+  El.HAMBURGER.addEventListener('click', () => {
+    expandMenu = !expandMenu;
+    if (expandMenu) {
+      El.CONTROLS.classList.remove('hidden');
+    } else {
+      El.CONTROLS.classList.add('hidden');
+    }
+  });
 
 const METRICS = {
   1: (x1, y1, x2, y2) => Math.abs(x1 - x2) + Math.abs(y1 - y2),
@@ -331,10 +369,14 @@ function AnimatedVoronoi(numCells) {
 
   return {
     togglePause: () => {
+      if (queue.size === 0) {
+        return true;
+      }
       isPaused = !isPaused;
       if (!isPaused) {
         drawFrame();
       }
+      return false;
     },
   };
 }
@@ -344,7 +386,12 @@ const regenerate = () => {
   v = new AnimatedVoronoi(parseInt(El.NUM_CELLS.value));
 };
 El.REGENERATE.addEventListener('click', regenerate);
-El.CANVAS_CONTAINER.addEventListener('mousedown', () => v.togglePause());
+El.CANVAS_CONTAINER.addEventListener('mousedown', () => {
+  const done = v.togglePause();
+  if (done) {
+    regenerate();
+  }
+});
 regenerate();
 })();
 </script>
