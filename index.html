@@ -274,15 +274,10 @@ function Bitmap() {
 // animation parameters
 let screenFractionPerMs = 20e-5;
 let bounce = true;
-El.SPEED.addEventListener('change', () => {
-  screenFractionPerMs = parseInt(El.SPEED.value) * 1e-5;
-});
-El.BOUNCE.addEventListener('change', () => {
-  bounce = El.BOUNCE.checked;
-});
 
-function AnimatedVoronoi(numCells) {
+function AnimatedVoronoi() {
   const metric = METRICS[El.METRIC.value];
+  const numCells = parseInt(El.NUM_CELLS.value);
 
   // init bitmap
   const bitmap = new Bitmap();
@@ -319,8 +314,8 @@ function AnimatedVoronoi(numCells) {
   const queue = new PriorityQueue();
 
   // store the order in which we draw the pixels
-  const drawOrder = new Array(numPixels - cells.length);
-  let drawOrderIndex = 0;
+  const drawSequence = bounce ? new Array(numPixels - cells.length) : undefined;
+  let drawSequenceIndex = 0;
   let increasing;
 
   // visit centers and their immediate neighbors
@@ -349,26 +344,26 @@ function AnimatedVoronoi(numCells) {
     const numPixelsToDraw =
           Math.round(numPixels * screenFractionPerMs * (timestamp - prevTimestamp));
     prevTimestamp = timestamp;
-    if (queue.size === 0) {
+    if (queue.size === 0 && drawSequence !== undefined) {
       for (let i = 0; i < numPixelsToDraw; i++) {
-        const [x, y, id] = drawOrder[drawOrderIndex];
+        const [x, y, id] = drawSequence[drawSequenceIndex];
         if (increasing) {
           bitmap.setPixel(x, y, cells[id].color);
-          if (drawOrderIndex === drawOrder.length - 1) {
+          if (drawSequenceIndex === drawSequence.length - 1) {
             if (!bounce) return;
             increasing = false;
-            drawOrderIndex--;
+            drawSequenceIndex--;
           } else {
-            drawOrderIndex++;
+            drawSequenceIndex++;
           }
         } else {
           bitmap.setPixel(x, y, BLACK);
-          if (drawOrderIndex === 0) {
+          if (drawSequenceIndex === 0) {
             if (!bounce) return;
             increasing = true;
-            drawOrderIndex++;
+            drawSequenceIndex++;
           } else {
-            drawOrderIndex--;
+            drawSequenceIndex--;
           }
         }
       }
@@ -378,7 +373,9 @@ function AnimatedVoronoi(numCells) {
         // color pixel
         visited[y][x] = true;
         bitmap.setPixel(x, y, cell.color);
-        drawOrder[drawOrderIndex++] = [x, y, cell.id];
+        if (drawSequence !== undefined) {
+          drawSequence[drawSequenceIndex++] = [x, y, cell.id];
+        }
         // determine neighbors by quadrant
         const relativeX = Math.sign(x - cell.x);
         const relativeY = Math.sign(y - cell.y);
@@ -401,8 +398,10 @@ function AnimatedVoronoi(numCells) {
         }
       }
       if (queue.size === 0) {
-        drawOrderIndex = drawOrder.length - 1;
-        increasing = false;
+        if (drawSequence !== undefined) {
+          drawSequenceIndex = drawSequence.length - 1;
+          increasing = false;
+        }
         visited = undefined;
       }
     }
@@ -414,22 +413,36 @@ function AnimatedVoronoi(numCells) {
   requestAnimationFrame(drawFrame);
 
   return {
-    togglePause: () => {
-      isPaused = !isPaused;
-      if (!isPaused) {
-        drawFrame();
-      }
+    get isPaused() {
+      return isPaused;
+    },
+    pause() {
+      isPaused = true;
+    },
+    play() {
+      isPaused = false;
+      drawFrame();
     },
   };
 }
 
-let v;
+// regenerate/play/pause
+let v = new AnimatedVoronoi();
 const regenerate = () => {
-  v = new AnimatedVoronoi(parseInt(El.NUM_CELLS.value));
+  v.pause();
+  v = new AnimatedVoronoi();
 };
 El.REGENERATE.addEventListener('click', regenerate);
-El.CANVAS_CONTAINER.addEventListener('mousedown', () => v.togglePause());
-regenerate();
+El.CANVAS_CONTAINER.addEventListener('mousedown', () => v.isPaused ? v.play() : v.pause());
+
+// other inputs
+El.SPEED.addEventListener('change', () => {
+  screenFractionPerMs = parseInt(El.SPEED.value) * 1e-5;
+});
+El.BOUNCE.addEventListener('change', () => {
+  bounce = El.BOUNCE.checked;
+  regenerate();
+});
 })();
 </script>
 </body>
