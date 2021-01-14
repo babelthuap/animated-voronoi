@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -20,7 +19,7 @@ body {
 #menu {
   left: 8px;
   position: fixed;
-  top: 8px;
+  top: 10px;
   z-index: 1;
 }
 #hamburger {
@@ -40,6 +39,7 @@ body {
   flex-direction: column;
   font-size: 16px;
   justify-content: center;
+  margin-left: 4px;
 }
 #controls > * {
   margin: 8px 0;
@@ -51,7 +51,7 @@ body {
 #numCells {
   font-size: 16px;
   font-family: Courier, monospace;
-  width: 72px;
+  width: 130px;
 }
 #metric {
   font-size: 16px;
@@ -64,6 +64,14 @@ body {
   color: #000;
   font-family: Courier, monospace;
   font-size: 20px;
+}
+.control-row {
+  background-color: rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
+  font-size: 18px;
+  font-weight: bold;
+  padding: 3px;
+  user-select: none;
 }
 #canvasContainer {
   height: 100vh;
@@ -80,7 +88,7 @@ body {
     <div></div>
     <div></div>
   </div>
-  <div id="controls" class="hidden">
+  <div id="controls">
     <input id="numCells" title="number of cells" type="number" value="100">
     <select id="metric" title="metric">
       <option value="1">taxicab</option>
@@ -88,6 +96,10 @@ body {
       <option value="3">x^3 + y^3</option>
     </select>
     <button id="regenerate">regenerate</button>
+    <input id="speed" title="speed" type="range" min="1" max="50" value="20">
+    <label class="control-row">
+      <input id="bounce" type="checkbox" checked> <span>bounce</span>
+    </label>
   </div>
 </div>
 <div id="canvasContainer"></div>
@@ -96,12 +108,14 @@ body {
 'use strict';
 
 const El = {
+  BOUNCE: document.getElementById('bounce'),
   CANVAS_CONTAINER: document.getElementById('canvasContainer'),
   CONTROLS: document.getElementById('controls'),
   HAMBURGER: document.getElementById('hamburger'),
   METRIC: document.getElementById('metric'),
   NUM_CELLS: document.getElementById('numCells'),
   REGENERATE: document.getElementById('regenerate'),
+  SPEED: document.getElementById('speed'),
 };
 
 if (localStorage.animatedVoronoiNumCells) {
@@ -115,15 +129,15 @@ if (localStorage.animatedVoronoiMetric) {
 El.METRIC.addEventListener(
     'change', () => localStorage.animatedVoronoiMetric = El.METRIC.value);
 
-  let expandMenu = false;
-  El.HAMBURGER.addEventListener('click', () => {
-    expandMenu = !expandMenu;
-    if (expandMenu) {
-      El.CONTROLS.classList.remove('hidden');
-    } else {
-      El.CONTROLS.classList.add('hidden');
-    }
-  });
+let expandMenu = !El.CONTROLS.classList.contains('hidden');
+El.HAMBURGER.addEventListener('click', () => {
+  expandMenu = !expandMenu;
+  if (expandMenu) {
+    El.CONTROLS.classList.remove('hidden');
+  } else {
+    El.CONTROLS.classList.add('hidden');
+  }
+});
 
 const METRICS = {
   1: (x1, y1, x2, y2) => Math.abs(x1 - x2) + Math.abs(y1 - y2),
@@ -257,6 +271,16 @@ function Bitmap() {
   };
 }
 
+// animation parameters
+let screenFractionPerMs = 20e-5;
+let bounce = true;
+El.SPEED.addEventListener('change', () => {
+  screenFractionPerMs = parseInt(El.SPEED.value) * 1e-5;
+});
+El.BOUNCE.addEventListener('change', () => {
+  bounce = El.BOUNCE.checked;
+});
+
 function AnimatedVoronoi(numCells) {
   const metric = METRICS[El.METRIC.value];
 
@@ -264,17 +288,11 @@ function AnimatedVoronoi(numCells) {
   const bitmap = new Bitmap();
   const width = bitmap.width;
   const height = bitmap.height;
-  if (numCells > width * height / 9) {
+  const numPixels = width * height;
+  if (numCells > numPixels / 9) {
     console.log('too many cells!');
     return;
   }
-
-  const isValid = (x, y) => 0 <= x && x < width && 0 <= y && y < height;
-
-  // determine animation speed
-  const frames = 500;
-  const pixelsPerIteration = Math.ceil(width * height / frames);
-  let isPaused = false;
 
   // place cells
   const cells = (() => {
@@ -291,17 +309,17 @@ function AnimatedVoronoi(numCells) {
       } while (centers.has(pair(x, y)));
       centers.add(pair(x, y));
       const color = Uint8ClampedArray.from([rand(256), rand(256), rand(256)])
-      cells[id] = {id, x, y, color};
+      cells[id] = {id, x: x + 1, y:y + 1, color};
     }
     return cells;
   })();
 
   // partition cells with a little help from Dijkstra
   let visited = new Array(height).fill().map(() => new Array(width));
-  const queue = new PriorityQueue(width * height);
+  const queue = new PriorityQueue();
 
   // store the order in which we draw the pixels
-  const drawOrder = new Array(width * height - cells.length);
+  const drawOrder = new Array(numPixels - cells.length);
   let drawOrderIndex = 0;
   let increasing;
 
@@ -309,25 +327,35 @@ function AnimatedVoronoi(numCells) {
   for (let id = 0; id < cells.length; id++) {
     const cell = cells[id];
     visited[cell.y][cell.x] = true;
-    for (const [dx, dy] of NBR_8) {
-      const nbrX = cell.x + dx;
-      const nbrY = cell.y + dy;
-      if (isValid(nbrX, nbrY)) {
-        visited[nbrY][nbrX] = true;
-        queue.push(
-            metric(cell.x, cell.y, nbrX, nbrY), {x: nbrX, y: nbrY, cell});
-      }
+    for (let nbr = 0; nbr < NBR_8.length; nbr++) {
+      const nbrX = cell.x + NBR_8[nbr][0];
+      const nbrY = cell.y + NBR_8[nbr][1];
+      visited[nbrY][nbrX] = true;
+      queue.push(
+          metric(cell.x, cell.y, nbrX, nbrY), {x: nbrX, y: nbrY, cell});
     }
   }
 
   // color in the specified number of cells on each frame
-  const drawFrame = () => {
+  let prevTimestamp;
+  let isPaused = false;
+  const drawFrame = (timestamp) => {
+    if (prevTimestamp === undefined) {
+      prevTimestamp = timestamp;
+      bitmap.repaint();
+      requestAnimationFrame(drawFrame);
+      return;
+    }
+    const numPixelsToDraw =
+          Math.round(numPixels * screenFractionPerMs * (timestamp - prevTimestamp));
+    prevTimestamp = timestamp;
     if (queue.size === 0) {
-      for (let i = 0; i < pixelsPerIteration; i++) {
+      for (let i = 0; i < numPixelsToDraw; i++) {
         const [x, y, id] = drawOrder[drawOrderIndex];
         if (increasing) {
           bitmap.setPixel(x, y, cells[id].color);
           if (drawOrderIndex === drawOrder.length - 1) {
+            if (!bounce) return;
             increasing = false;
             drawOrderIndex--;
           } else {
@@ -336,6 +364,7 @@ function AnimatedVoronoi(numCells) {
         } else {
           bitmap.setPixel(x, y, BLACK);
           if (drawOrderIndex === 0) {
+            if (!bounce) return;
             increasing = true;
             drawOrderIndex++;
           } else {
@@ -344,7 +373,7 @@ function AnimatedVoronoi(numCells) {
         }
       }
     } else {
-      for (let i = 0; i < pixelsPerIteration && queue.size > 0; i++) {
+      for (let i = 0; i < numPixelsToDraw && queue.size > 0; i++) {
         const {x, y, cell} = queue.pop();
         // color pixel
         visited[y][x] = true;
@@ -355,10 +384,16 @@ function AnimatedVoronoi(numCells) {
         const relativeY = Math.sign(y - cell.y);
         const neighborOffsets = NEIGHBOR_OFFSETS[relativeX + 1][relativeY + 1];
         // add neighbors to priority queue
-        for (const [dx, dy] of neighborOffsets) {
-          const nbrX = x + dx;
-          const nbrY = y + dy;
-          if (isValid(nbrX, nbrY) && visited[nbrY][nbrX] === undefined) {
+        for (let nbr = 0; nbr < neighborOffsets.length; nbr++) {
+          const nbrX = x + neighborOffsets[nbr][0];
+          if (nbrX === -1 || nbrX === width) {
+            continue;
+          }
+          const nbrY = y + neighborOffsets[nbr][1];
+          if (nbrY === -1 || nbrY === height) {
+            continue;
+          }
+          if (visited[nbrY][nbrX] === undefined) {
             visited[nbrY][nbrX] = true;
             queue.push(
                 metric(cell.x, cell.y, nbrX, nbrY), {x: nbrX, y: nbrY, cell});
@@ -372,7 +407,7 @@ function AnimatedVoronoi(numCells) {
       }
     }
     bitmap.repaint();
-    if (!isPaused) {
+    if (!isPaused && (bounce || queue.size > 0)) {
       requestAnimationFrame(drawFrame);
     }
   };
