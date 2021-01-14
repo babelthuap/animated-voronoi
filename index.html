@@ -24,7 +24,7 @@ body {
 }
 #hamburger {
   cursor: pointer;
-  margin-bottom: 8px;
+  margin-bottom: 16px;
 }
 #hamburger > div {
   background-color: #fff;
@@ -263,7 +263,7 @@ function AnimatedVoronoi(numCells) {
   const isValid = (x, y) => 0 <= x && x < width && 0 <= y && y < height;
 
   // determine animation speed
-  const frames = 200;
+  const frames = 500;
   const pixelsPerIteration = Math.ceil(width * height / frames);
   let isPaused = false;
 
@@ -393,6 +393,7 @@ function AnimatedVoronoi(numCells) {
       if (queue.size === 0) {
         drawOrderIndex = drawOrder.length - 1;
         increasing = false;
+        visited = undefined;
       }
     }
     bitmap.repaint();
