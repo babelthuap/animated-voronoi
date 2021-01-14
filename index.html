@@ -288,7 +288,7 @@ function AnimatedVoronoi(numCells) {
   })();
 
   // partition cells with a little help from Dijkstra
-  const visited = new Array(height).fill().map(() => new Array(width));
+  let visited = new Array(height).fill().map(() => new Array(width));
   const queue = new PriorityQueue(width * height);
 
   // store the order in which we draw the pixels
