@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -151,6 +152,16 @@ const NBRS_Q1 = [[1, 0], [1, -1], [0, -1]];
 const NBRS_Q2 = [[0, -1], [-1, -1], [-1, 0]];
 const NBRS_Q3 = [[-1, 0], [-1, 1], [0, 1]];
 const NBRS_Q4 = [[0, 1], [1, 1], [1, 0]];
+const NEIGHBOR_OFFSETS = [
+  // relativeX == -1
+  [NBRS_Q2, NBR_LT, NBRS_Q3],
+  // relativeX == 0
+  [NBR_UP, NBR_8, NBR_DN],
+  // relativeX == 1
+  [NBRS_Q1, NBR_RT, NBRS_Q4],
+];
+
+const BLACK = Uint8ClampedArray.from([0, 0, 0]);
 
 const rand = (n) => Math.floor(Math.random() * n);
 
@@ -246,8 +257,6 @@ function Bitmap() {
   };
 }
 
-const BLACK = Uint8ClampedArray.from([0, 0, 0]);
-
 function AnimatedVoronoi(numCells) {
   const metric = METRICS[El.METRIC.value];
 
@@ -342,43 +351,9 @@ function AnimatedVoronoi(numCells) {
         bitmap.setPixel(x, y, cell.color);
         drawOrder[drawOrderIndex++] = [x, y, cell.id];
         // determine neighbors by quadrant
-        let neighborOffsets;
-        let relativeX = Math.sign(x - cell.x);
-        let relativeY = Math.sign(y - cell.y);
-        switch (relativeX) {
-          case 0:
-            // vertical
-            neighborOffsets = relativeY === 1 ? NBR_DN : NBR_UP;
-            break;
-          case 1:
-            // right
-            switch (relativeY) {
-              case 0:
-                neighborOffsets = NBR_RT;
-                break;
-              case 1:
-                neighborOffsets = NBRS_Q4;
-                break;
-              case -1:
-                neighborOffsets = NBRS_Q1;
-                break;
-            }
-            break;
-          case -1:
-            // left
-            switch (relativeY) {
-              case 0:
-                neighborOffsets = NBR_LT;
-                break;
-              case 1:
-                neighborOffsets = NBRS_Q3;
-                break;
-              case -1:
-                neighborOffsets = NBRS_Q2;
-                break;
-            }
-            break;
-        }
+        const relativeX = Math.sign(x - cell.x);
+        const relativeY = Math.sign(y - cell.y);
+        const neighborOffsets = NEIGHBOR_OFFSETS[relativeX + 1][relativeY + 1];
         // add neighbors to priority queue
         for (const [dx, dy] of neighborOffsets) {
           const nbrX = x + dx;
