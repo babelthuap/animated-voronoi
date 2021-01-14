@@ -167,14 +167,14 @@ function PriorityQueue() {
     get size() {
       return heap.length;
     },
-    push(value, priority) {
-      heap.push({value, priority});
+    push(priority, value) {
+      heap.push([priority, value]);
       // percolate up
       let i = heap.length - 1;
       const node = heap[i];
       while (i > 0) {
         const p = parent(i);
-        if (heap[p].priority > node.priority) {
+        if (heap[p][0] > node[0]) {
           heap[i] = heap[p];
           i = p;
         } else {
@@ -185,9 +185,9 @@ function PriorityQueue() {
     },
     pop() {
       if (heap.length === 1) {
-        return heap.pop().value;
+        return heap.pop()[1];
       }
-      const value = heap[0].value;
+      const value = heap[0][1];
       // percolate down
       const node = heap[0] = heap.pop();
       const size = heap.length;
@@ -196,10 +196,10 @@ function PriorityQueue() {
         const left = leftChild(i);
         const right = rightChild(i);
         const minChild =
-            (right < size && heap[right].priority < heap[left].priority) ?
+            (right < size && heap[right][0] < heap[left][0]) ?
             right :
             left;
-        if (heap[minChild].priority > node.priority) {
+        if (heap[minChild][0] > node[0]) {
           break;
         }
         heap[i] = heap[minChild];
@@ -246,6 +246,8 @@ function Bitmap() {
   };
 }
 
+const BLACK = Uint8ClampedArray.from([0, 0, 0]);
+
 function AnimatedVoronoi(numCells) {
   const metric = METRICS[El.METRIC.value];
 
@@ -289,79 +291,112 @@ function AnimatedVoronoi(numCells) {
   const visited = new Array(height).fill().map(() => new Array(width));
   const queue = new PriorityQueue(width * height);
 
+  // store the order in which we draw the pixels
+  const drawOrder = new Array(width * height - cells.length);
+  let drawOrderIndex = 0;
+  let increasing;
+
   // visit centers and their immediate neighbors
   for (let id = 0; id < cells.length; id++) {
     const cell = cells[id];
-    visited[cell.y][cell.x] = id;
+    visited[cell.y][cell.x] = true;
     for (const [dx, dy] of NBR_8) {
       const nbrX = cell.x + dx;
       const nbrY = cell.y + dy;
       if (isValid(nbrX, nbrY)) {
         visited[nbrY][nbrX] = true;
         queue.push(
-            {x: nbrX, y: nbrY, cell}, metric(cell.x, cell.y, nbrX, nbrY));
+            metric(cell.x, cell.y, nbrX, nbrY), {x: nbrX, y: nbrY, cell});
       }
     }
   }
 
   // color in the specified number of cells on each frame
   const drawFrame = () => {
-    for (let i = 0; i < pixelsPerIteration && queue.size > 0; i++) {
-      const {x, y, cell} = queue.pop();
-      // color pixel
-      visited[y][x] = cell.id;
-      bitmap.setPixel(x, y, cell.color);
-      // determine neighbors by quadrant
-      let neighborOffsets;
-      let relativeX = Math.sign(x - cell.x);
-      let relativeY = Math.sign(y - cell.y);
-      switch (relativeX) {
-        case 0:
-          // vertical
-          neighborOffsets = relativeY === 1 ? NBR_DN : NBR_UP;
-          break;
-        case 1:
-          // right
-          switch (relativeY) {
-            case 0:
-              neighborOffsets = NBR_RT;
-              break;
-            case 1:
-              neighborOffsets = NBRS_Q4;
-              break;
-            case -1:
-              neighborOffsets = NBRS_Q1;
-              break;
+    if (queue.size === 0) {
+      for (let i = 0; i < pixelsPerIteration; i++) {
+        const [x, y, id] = drawOrder[drawOrderIndex];
+        if (increasing) {
+          bitmap.setPixel(x, y, cells[id].color);
+          if (drawOrderIndex === drawOrder.length - 1) {
+            increasing = false;
+            drawOrderIndex--;
+          } else {
+            drawOrderIndex++;
           }
-          break;
-        case -1:
-          // left
-          switch (relativeY) {
-            case 0:
-              neighborOffsets = NBR_LT;
-              break;
-            case 1:
-              neighborOffsets = NBRS_Q3;
-              break;
-            case -1:
-              neighborOffsets = NBRS_Q2;
-              break;
+        } else {
+          bitmap.setPixel(x, y, BLACK);
+          if (drawOrderIndex === 0) {
+            increasing = true;
+            drawOrderIndex++;
+          } else {
+            drawOrderIndex--;
           }
-          break;
-      }
-      // add neighbors to priority queue
-      for (const [dx, dy] of neighborOffsets) {
-        const nbrX = x + dx;
-        const nbrY = y + dy;
-        if (isValid(nbrX, nbrY) && visited[nbrY][nbrX] === undefined) {
-          visited[nbrY][nbrX] = true;
-          queue.push(
-              {x: nbrX, y: nbrY, cell}, metric(cell.x, cell.y, nbrX, nbrY));
         }
+      }
+    } else {
+      for (let i = 0; i < pixelsPerIteration && queue.size > 0; i++) {
+        const {x, y, cell} = queue.pop();
+        // color pixel
+        visited[y][x] = true;
+        bitmap.setPixel(x, y, cell.color);
+        drawOrder[drawOrderIndex++] = [x, y, cell.id];
+        // determine neighbors by quadrant
+        let neighborOffsets;
+        let relativeX = Math.sign(x - cell.x);
+        let relativeY = Math.sign(y - cell.y);
+        switch (relativeX) {
+          case 0:
+            // vertical
+            neighborOffsets = relativeY === 1 ? NBR_DN : NBR_UP;
+            break;
+          case 1:
+            // right
+            switch (relativeY) {
+              case 0:
+                neighborOffsets = NBR_RT;
+                break;
+              case 1:
+                neighborOffsets = NBRS_Q4;
+                break;
+              case -1:
+                neighborOffsets = NBRS_Q1;
+                break;
+            }
+            break;
+          case -1:
+            // left
+            switch (relativeY) {
+              case 0:
+                neighborOffsets = NBR_LT;
+                break;
+              case 1:
+                neighborOffsets = NBRS_Q3;
+                break;
+              case -1:
+                neighborOffsets = NBRS_Q2;
+                break;
+            }
+            break;
+        }
+        // add neighbors to priority queue
+        for (const [dx, dy] of neighborOffsets) {
+          const nbrX = x + dx;
+          const nbrY = y + dy;
+          if (isValid(nbrX, nbrY) && visited[nbrY][nbrX] === undefined) {
+            visited[nbrY][nbrX] = true;
+            queue.push(
+                metric(cell.x, cell.y, nbrX, nbrY), {x: nbrX, y: nbrY, cell});
+          }
+        }
+      }
+      if (queue.size === 0) {
+        drawOrderIndex = drawOrder.length - 1;
+        increasing = false;
       }
     }
     bitmap.repaint();
-    if (queue.size > 0 && !isPaused) {
+    if (!isPaused) {
       requestAnimationFrame(drawFrame);
     }
   };
@@ -369,14 +404,10 @@ function AnimatedVoronoi(numCells) {
 
   return {
     togglePause: () => {
-      if (queue.size === 0) {
-        return true;
-      }
       isPaused = !isPaused;
       if (!isPaused) {
         drawFrame();
       }
-      return false;
     },
   };
 }
@@ -386,12 +417,7 @@ const regenerate = () => {
   v = new AnimatedVoronoi(parseInt(El.NUM_CELLS.value));
 };
 El.REGENERATE.addEventListener('click', regenerate);
-El.CANVAS_CONTAINER.addEventListener('mousedown', () => {
-  const done = v.togglePause();
-  if (done) {
-    regenerate();
-  }
-});
+El.CANVAS_CONTAINER.addEventListener('mousedown', () => v.togglePause());
 regenerate();
 })();
 </script>
