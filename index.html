@@ -88,7 +88,7 @@ body {
     <div></div>
     <div></div>
   </div>
-  <div id="controls">
+  <div id="controls" class="hidden">
     <input id="numCells" title="number of cells" type="number" value="100">
     <select id="metric" title="metric">
       <option value="1">taxicab</option>
@@ -96,9 +96,9 @@ body {
       <option value="3">x^3 + y^3</option>
     </select>
     <button id="regenerate">regenerate</button>
-    <input id="speed" title="speed" type="range" min="1" max="50" value="20">
+    <input id="speed" title="speed" type="range" min="1" max="50" value="10">
     <label class="control-row">
-      <input id="bounce" type="checkbox" checked> <span>bounce</span>
+      <input id="bounce" type="checkbox"> bounce
     </label>
   </div>
 </div>
@@ -272,8 +272,8 @@ function Bitmap() {
 }
 
 // animation parameters
-let screenFractionPerMs = 20e-5;
-let bounce = true;
+let screenFractionPerMs = 10e-5;
+let bounce = false;
 
 function AnimatedVoronoi() {
   const metric = METRICS[El.METRIC.value];
@@ -371,7 +371,6 @@ function AnimatedVoronoi() {
       for (let i = 0; i < numPixelsToDraw && queue.size > 0; i++) {
         const {x, y, cell} = queue.pop();
         // color pixel
-        visited[y][x] = true;
         bitmap.setPixel(x, y, cell.color);
         if (drawSequence !== undefined) {
           drawSequence[drawSequenceIndex++] = [x, y, cell.id];
